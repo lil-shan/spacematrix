@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>18x10 Pixel Painter</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            text-align: center;
+            padding: 20px;
+            max-width: 800px;
+            margin: 0 auto;
+        }
+        #pixel-container {
+            display: grid;
+            grid-template-columns: repeat(10, 30px);
+            grid-template-rows: repeat(18, 30px);
+            gap: 1px;
+            margin: 20px auto;
+            width: fit-content;
+        }
+        .pixel {
+            width: 30px;
+            height: 30px;
+            background-color: white;
+            border: 1px solid #ccc;
+            cursor: pointer;
+        }
+        .painted {
+            background-color: black;
+        }
+        button {
+            padding: 10px 20px;
+            font-size: 16px;
+            margin: 10px 5px;
+            background-color: #007BFF;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #0056b3;
+        }
+        pre {
+            background-color: #f4f4f4;
+            padding: 10px;
+            border-radius: 5px;
+            max-width: 500px;
+            margin: 20px auto;
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            text-align: left;
+        }
+        .controls {
+            margin-top: 15px;
+            display: flex;
+            justify-content: center;
+            flex-wrap: wrap;
+        }
+        #example-container {
+            display: flex;
+            justify-content: center;
+            margin-top: 15px;
+        }
+        #example-image {
+            width: 310px;
+            display: grid;
+            grid-template-columns: repeat(10, 30px);
+            grid-template-rows: repeat(18, 30px);
+            gap: 1px;
+        }
+        .example-pixel {
+            width: 30px;
+            height: 30px;
+            border: 1px solid #ccc;
+        }
+        .example-filled {
+            background-color: black;
+        }
+        h2 {
+            margin-top: 30px;
+        }
+    </style>
+</head>
+<body>
+    <h1>18x10 Pixel Painter</h1>
+    <p>Click on pixels to toggle them on/off, then generate the binary matrix</p>
+    
+    <div id="pixel-container"></div>
+    
+    <div class="controls">
+        <button onclick="generateMatrix()">Generate Matrix</button>
+        <button onclick="clearPixels()">Clear All</button>
+        <button onclick="loadExample()">Load Example</button>
+    </div>
+    
+    <h2>Output Format</h2>
+    <pre id="matrix-output">Click "Generate Matrix" to see the output</pre>
+    
+    <script>
+        let paintedPixels = Array(18).fill().map(() => Array(10).fill(0));
+        
+        function createPixels() {
+            const pixelContainer = document.getElementById('pixel-container');
+            pixelContainer.innerHTML = '';
+            
+            for (let row = 0; row < 18; row++) {
+                for (let col = 0; col < 10; col++) {
+                    const pixel = document.createElement('div');
+                    pixel.classList.add('pixel');
+                    if (paintedPixels[row][col] === 1) {
+                        pixel.classList.add('painted');
+                    }
+                    pixel.dataset.row = row;
+                    pixel.dataset.col = col;
+                    pixel.addEventListener('click', togglePixel);
+                    pixelContainer.appendChild(pixel);
+                }
+            }
+        }
+        
+        function togglePixel(event) {
+            const pixel = event.target;
+            const row = parseInt(pixel.dataset.row);
+            const col = parseInt(pixel.dataset.col);
+            
+            if (paintedPixels[row][col] === 0) {
+                paintedPixels[row][col] = 1;
+                pixel.classList.add('painted');
+            } else {
+                paintedPixels[row][col] = 0;
+                pixel.classList.remove('painted');
+            }
+        }
+        
+        function generateMatrix() {
+            const matrixOutput = document.getElementById('matrix-output');
+            let matrixString = '';
+            
+            for (let row = 0; row < 18; row++) {
+                matrixString += '0b';
+                for (let col = 0; col < 10; col++) {
+                    matrixString += paintedPixels[row][col];
+                }
+                if (row < 17) {
+                    matrixString += ',\n';
+                } else {
+                    matrixString += '\n';
+                }
+            }
+            
+            matrixOutput.textContent = matrixString.trim();
+        }
+        
+        function clearPixels() {
+            paintedPixels = Array(18).fill().map(() => Array(10).fill(0));
+            createPixels();
+        }
+        
+        function loadExample() {
+            const examplePattern = [
+                "1111111100",
+                "1100001110",
+                "1100000110",
+                "1100000011",
+                "1100000011",
+                "1100000011",
+                "1100000110",
+                "1100001110",
+                "1111111100",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000",
+                "1100000000"
+            ];
+            
+            for (let row = 0; row < 18; row++) {
+                for (let col = 0; col < 10; col++) {
+                    paintedPixels[row][col] = parseInt(examplePattern[row][col]);
+                }
+            }
+            
+            createPixels();
+        }
+        
+        createPixels();
+    </script>
+</body>
+</html>
