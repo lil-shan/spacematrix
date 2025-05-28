@@ -1,0 +1,737 @@
+#include <Adafruit_NeoPixel.h>
+#include <string.h>
+#include <WiFi.h>
+#include <WebServer.h>
+#include <SPIFFS.h>
+#include "Font18x12.h"
+
+#define NUM_STRIPS       18
+#define LEDS_PER_STRIP   508
+
+#define FONT_WIDTH       12
+#define FONT_HEIGHT      18
+#define CHAR_SPACING     4
+#define CHAR_PITCH       (FONT_WIDTH + CHAR_SPACING)
+#define TEXT_SPACING     15
+
+const char* ssid = "LEDMatrixAP";
+const char* password = "matrix12345";
+
+WebServer server(80);
+
+int stripPins[NUM_STRIPS] = {18, 19, 21, 22, 23, 25, 26, 27, 5, 33, 13, 4, 12, 15, 16, 2, 14, 1};
+Adafruit_NeoPixel strips[NUM_STRIPS];
+bool displayBuffer[NUM_STRIPS][LEDS_PER_STRIP] = {0};
+
+char displayText[100] = "welcome to tinkerspace";
+int textWidth = 0;
+int offsetOdd = LEDS_PER_STRIP;
+int offsetEven = LEDS_PER_STRIP;
+
+uint8_t textColorR = 255, textColorG = 165, textColorB = 0;
+int scrollInterval = 10;
+int scrollStep = 1;
+int brightness = 50;
+
+unsigned long previousMillisOdd = 0;
+unsigned long previousMillisEven = 0;
+
+const char MAIN_page[] PROGMEM = R"rawliteral(
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <title>Space Matrix Panel</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <style>
+        :root {
+            --primary-color: #2596be;
+            --primary-dark: #1b7490;
+            --primary-light: #3aabcd;
+            --light-color: #f8f9fa;
+            --dark-color: #212529;
+            --border-radius: 8px;
+            --box-shadow: 0 4px 6px rgba(0, 0, 0, 0.1);
+            --transition: all 0.3s ease;
+        }
+        
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f0f4f8;
+            color: var(--dark-color);
+            line-height: 1.6;
+            height: 100vh;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .container {
+            width: 100%;
+            max-width: 480px;
+            background: white;
+            padding: 0 0 15px 0;
+            border-radius: var(--border-radius);
+            box-shadow: var(--box-shadow);
+            max-height: 98vh;
+            overflow-y: auto;
+        }
+        
+        h1 {
+            color: white;
+            text-align: center;
+            margin-bottom: 15px;
+            font-size: 22px;
+            background-color: var(--primary-color);
+            padding: 12px;
+            border-top-left-radius: var(--border-radius);
+            border-top-right-radius: var(--border-radius);
+        }
+        
+        .control-group {
+            margin-bottom: 10px;
+            padding: 0 15px;
+        }
+        
+        label {
+            display: block;
+            margin-bottom: 4px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        
+        input[type="text"] {
+            width: 100%;
+            padding: 8px 10px;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            font-size: 14px;
+            transition: var(--transition);
+        }
+        
+        input[type="text"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+            box-shadow: 0 0 0 3px rgba(37, 150, 190, 0.2);
+        }
+        
+        .color-picker-container {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .color-preview {
+            width: 100%;
+            height: 30px;
+            border-radius: var(--border-radius);
+            border: 1px solid #ddd;
+            transition: var(--transition);
+        }
+        
+        .input-row {
+            display: flex;
+            gap: 5px;
+            margin-bottom: 5px;
+        }
+        
+        .input-group {
+            flex: 1;
+        }
+        
+        .input-group label {
+            display: block;
+            margin-bottom: 2px;
+            font-size: 12px;
+        }
+        
+        .input-group input[type="number"] {
+            width: 100%;
+            padding: 6px;
+            border: 1px solid #ddd;
+            border-radius: var(--border-radius);
+            font-size: 13px;
+        }
+        
+        .input-group input[type="number"]:focus {
+            outline: none;
+            border-color: var(--primary-color);
+        }
+        
+        .input-note {
+            font-size: 10px;
+            color: #666;
+            margin-top: 2px;
+            text-align: center;
+        }
+        
+        button {
+            background-color: var(--primary-color);
+            color: white;
+            border: none;
+            padding: 10px;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+            width: 90%;
+            font-size: 15px;
+            font-weight: 600;
+            transition: var(--transition);
+            margin: 5px auto 0;
+            display: block;
+        }
+        
+        button:hover {
+            background-color: var(--primary-dark);
+            transform: translateY(-1px);
+        }
+        
+        button:active {
+            transform: translateY(1px);
+        }
+        
+        .status {
+            margin: 10px auto 0;
+            padding: 8px;
+            width: 90%;
+            border-radius: var(--border-radius);
+            display: none;
+            font-weight: 500;
+            transition: var(--transition);
+            font-size: 13px;
+            text-align: center;
+        }
+        
+        .status-success {
+            background-color: #e7f3fe;
+            border-left: 4px solid var(--primary-color);
+        }
+        
+        .status-error {
+            background-color: #ffebee;
+            border-left: 4px solid #f44336;
+        }
+        
+        .preset-colors {
+            display: flex;
+            flex-wrap: wrap;
+            gap: 6px;
+            justify-content: center;
+        }
+        
+        .color-preset {
+            width: 22px;
+            height: 22px;
+            border-radius: 50%;
+            cursor: pointer;
+            border: 2px solid white;
+            transition: var(--transition);
+            box-shadow: 0 1px 3px rgba(0,0,0,0.1);
+        }
+        
+        .color-preset:hover {
+            transform: scale(1.1);
+        }
+        
+        .color-preset.active {
+            border: 2px solid #333;
+            transform: scale(1.1);
+        }
+        
+        footer {
+            margin-top: 10px;
+            text-align: center;
+            font-size: 11px;
+            color: #666;
+        }
+        
+        .heart {
+            color: #ff4d6d;
+            display: inline-block;
+            animation: heartbeat 1.5s infinite;
+        }
+        
+        @keyframes heartbeat {
+            0% { transform: scale(1); }
+            14% { transform: scale(1.3); }
+            28% { transform: scale(1); }
+            42% { transform: scale(1.3); }
+            70% { transform: scale(1); }
+        }
+        
+        input[type="color"] {
+            width: 100%;
+            height: 30px;
+            border: none;
+            border-radius: var(--border-radius);
+            cursor: pointer;
+        }
+        
+        @media (max-width: 500px) {
+            .container {
+                padding: 15px;
+                max-width: 95%;
+            }
+            
+            .input-row {
+                flex-direction: column;
+                gap: 12px;
+            }
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>Space Matrix Panel</h1>
+        
+        <div class="control-group">
+            <label for="text">Display Text:</label>
+            <input type="text" id="text" name="text" placeholder="Enter text to display">
+        </div>
+        
+        <div class="control-group">
+            <h2 style="font-size: 16px; margin-bottom: 8px; color: var(--primary-dark);">Color Settings</h2>
+            <div style="display: flex; gap: 10px; align-items: center;">
+                <div style="flex: 1;">
+                    <input type="color" id="colorPicker" value="#FFA500" style="height: 30px;">
+                </div>
+                <div class="input-row" style="flex: 2; margin-bottom: 0;">
+                    <div class="input-group">
+                        <input type="number" id="valueR" min="0" max="255" value="255" placeholder="R">
+                    </div>
+                    
+                    <div class="input-group">
+                        <input type="number" id="valueG" min="0" max="255" value="165" placeholder="G">
+                    </div>
+                    
+                    <div class="input-group">
+                        <input type="number" id="valueB" min="0" max="255" value="0" placeholder="B">
+                    </div>
+                </div>
+            </div>
+            
+            <div class="preset-colors" style="margin-top: 5px;">
+                <div class="color-preset" style="background-color: #ff0000;" data-color="#ff0000"></div>
+                <div class="color-preset" style="background-color: #ff8000;" data-color="#ff8000"></div>
+                <div class="color-preset" style="background-color: #ffff00;" data-color="#ffff00"></div>
+                <div class="color-preset" style="background-color: #80ff00;" data-color="#80ff00"></div>
+                <div class="color-preset" style="background-color: #00ff00;" data-color="#00ff00"></div>
+                <div class="color-preset" style="background-color: #00ffff;" data-color="#00ffff"></div>
+                <div class="color-preset" style="background-color: #0080ff;" data-color="#0080ff"></div>
+                <div class="color-preset" style="background-color: #0000ff;" data-color="#0000ff"></div>
+                <div class="color-preset" style="background-color: #8000ff;" data-color="#8000ff"></div>
+                <div class="color-preset" style="background-color: #ff00ff;" data-color="#ff00ff"></div>
+                <div class="color-preset" style="background-color: #ffffff;" data-color="#ffffff"></div>
+                <div class="color-preset" style="background-color: #FFA500;" data-color="#FFA500"></div>
+            </div>
+        </div>
+        
+        <div class="control-group">
+            <div class="input-row">
+                <div class="input-group">
+                    <label for="valueBrightness">Brightness:</label>
+                    <input type="number" id="valueBrightness" min="0" max="255" value="50">
+                    <div class="input-note">0-100 (Ideal: 50)</div>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valueInterval">Scroll Interval:</label>
+                    <input type="number" id="valueInterval" min="0" max="100" value="10">
+                    <div class="input-note">Ideal: 10ms</div>
+                </div>
+                
+                <div class="input-group">
+                    <label for="valueStep">Scroll Step:</label>
+                    <input type="number" id="valueStep" min="1" max="10" value="1">
+                    <div class="input-note">1-3 (Ideal: 1)</div>
+                </div>
+            </div>
+        </div>
+        
+        <button id="updateButton">Update Now</button>
+        
+        <div id="status" class="status"></div>
+        
+        <footer>
+            Made with <span class="heart">&lt;3</span> by Rio, Shan, Nayana
+        </footer>
+    </div>
+
+    <script>
+        // Initialize variables
+        let textColorR = 255;
+        let textColorG = 165;
+        let textColorB = 0;
+        
+        // DOM elements
+        const valueR = document.getElementById('valueR');
+        const valueG = document.getElementById('valueG');
+        const valueB = document.getElementById('valueB');
+        const colorPicker = document.getElementById('colorPicker');
+        const valueBrightness = document.getElementById('valueBrightness');
+        const valueInterval = document.getElementById('valueInterval');
+        const valueStep = document.getElementById('valueStep');
+        const updateButton = document.getElementById('updateButton');
+        const colorPresets = document.querySelectorAll('.color-preset');
+        
+        // Initialize
+        window.onload = function() {
+            fetchCurrentSettings();
+            updateColorPreview();
+        };
+        
+        // Event Listeners
+        valueR.addEventListener('input', function() {
+            textColorR = clamp(parseInt(this.value) || 0, 0, 255);
+            this.value = textColorR;
+            updateColorPreview();
+        });
+        
+        valueG.addEventListener('input', function() {
+            textColorG = clamp(parseInt(this.value) || 0, 0, 255);
+            this.value = textColorG;
+            updateColorPreview();
+        });
+        
+        valueB.addEventListener('input', function() {
+            textColorB = clamp(parseInt(this.value) || 0, 0, 255);
+            this.value = textColorB;
+            updateColorPreview();
+        });
+        
+        colorPicker.addEventListener('input', function() {
+            const rgb = hexToRgb(this.value);
+            textColorR = rgb.r;
+            textColorG = rgb.g;
+            textColorB = rgb.b;
+            
+            valueR.value = textColorR;
+            valueG.value = textColorG;
+            valueB.value = textColorB;
+        });
+        
+        colorPresets.forEach(preset => {
+            preset.addEventListener('click', function() {
+                const color = this.getAttribute('data-color');
+                colorPicker.value = color;
+                
+                // Trigger the input event
+                const event = new Event('input');
+                colorPicker.dispatchEvent(event);
+                
+                // Highlight active preset
+                colorPresets.forEach(p => p.classList.remove('active'));
+                this.classList.add('active');
+            });
+        });
+        
+        updateButton.addEventListener('click', updateSettings);
+        
+        // Functions
+        function clamp(value, min, max) {
+            return Math.min(Math.max(value, min), max);
+        }
+        
+        function updateColorPreview() {
+            const hexColor = rgbToHex(textColorR, textColorG, textColorB);
+            colorPicker.value = hexColor;
+        }
+        
+        function fetchCurrentSettings() {
+            fetch('/settings')
+                .then(response => response.json())
+                .then(data => {
+                    document.getElementById('text').value = data.text;
+                    
+                    textColorR = data.colorR;
+                    textColorG = data.colorG;
+                    textColorB = data.colorB;
+                    
+                    valueR.value = textColorR;
+                    valueG.value = textColorG;
+                    valueB.value = textColorB;
+                    
+                    valueBrightness.value = data.brightness;
+                    valueInterval.value = data.scrollInterval;
+                    valueStep.value = data.scrollStep;
+                    
+                    updateColorPreview();
+                    
+                    // Find and highlight the matching preset color if it exists
+                    const hexColor = rgbToHex(textColorR, textColorG, textColorB);
+                    colorPresets.forEach(preset => {
+                        if (preset.getAttribute('data-color').toUpperCase() === hexColor.toUpperCase()) {
+                            preset.classList.add('active');
+                        }
+                    });
+                })
+                .catch(error => {
+                    showStatus('Error loading settings: ' + error.message, 'error');
+                });
+        }
+
+        function updateSettings() {
+            const text = document.getElementById('text').value;
+            const brightness = clamp(parseInt(valueBrightness.value) || 0, 0, 255);
+            const scrollInterval = clamp(parseInt(valueInterval.value) || 0, 0, 100);
+            const scrollStep = clamp(parseInt(valueStep.value) || 1, 1, 10);
+            
+            // Update input values
+            valueBrightness.value = brightness;
+            valueInterval.value = scrollInterval;
+            valueStep.value = scrollStep;
+            
+            // Show loading state
+            updateButton.textContent = 'Updating...';
+            updateButton.disabled = true;
+            
+            fetch('/update', {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded',
+                },
+                body: `text=${encodeURIComponent(text)}&colorR=${textColorR}&colorG=${textColorG}&colorB=${textColorB}&brightness=${brightness}&scrollInterval=${scrollInterval}&scrollStep=${scrollStep}`
+            })
+            .then(response => response.text())
+            .then(data => {
+                showStatus(data, 'success');
+                // Reset button state
+                updateButton.textContent = 'Update Settings';
+                updateButton.disabled = false;
+            })
+            .catch(error => {
+                showStatus('Error updating settings: ' + error.message, 'error');
+                // Reset button state
+                updateButton.textContent = 'Update Settings';
+                updateButton.disabled = false;
+            });
+        }
+
+        function showStatus(message, type) {
+            const statusDiv = document.getElementById('status');
+            statusDiv.textContent = message;
+            statusDiv.style.display = 'block';
+            
+            if (type === 'error') {
+                statusDiv.className = 'status status-error';
+            } else {
+                statusDiv.className = 'status status-success';
+            }
+            
+            setTimeout(() => {
+                statusDiv.style.display = 'none';
+            }, 3000);
+        }
+
+        function hexToRgb(hex) {
+            const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+            return result ? {
+                r: parseInt(result[1], 16),
+                g: parseInt(result[2], 16),
+                b: parseInt(result[3], 16)
+            } : { r: 255, g: 165, b: 0 };
+        }
+
+        function rgbToHex(r, g, b) {
+            return "#" + ((1 << 24) | (r << 16) | (g << 8) | b).toString(16).slice(1).toUpperCase();
+        }
+    </script>
+</body>
+</html>
+)rawliteral";
+
+void setup() {
+  Serial.begin(115200);
+  
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i] = Adafruit_NeoPixel(LEDS_PER_STRIP, stripPins[i], NEO_GRB + NEO_KHZ800);
+    strips[i].begin();
+    strips[i].setBrightness(brightness);
+    strips[i].clear();
+    strips[i].show();
+  }
+  
+  textWidth = strlen(displayText) * CHAR_PITCH;
+  
+  if(!SPIFFS.begin(true)){
+    Serial.println("An Error occurred while mounting SPIFFS");
+    return;
+  }
+  
+  WiFi.softAP(ssid, password);
+  Serial.println("Access Point Started");
+  Serial.print("IP Address: ");
+  Serial.println(WiFi.softAPIP());
+  
+  server.on("/", HTTP_GET, handleRoot);
+  server.on("/settings", HTTP_GET, handleGetSettings);
+  server.on("/update", HTTP_POST, handleUpdate);
+  
+  server.begin();
+  Serial.println("HTTP server started");
+}
+
+void loop() {
+  server.handleClient();
+  
+  unsigned long currentMillis = millis();
+
+  if (currentMillis - previousMillisOdd >= scrollInterval) {
+    previousMillisOdd = currentMillis;
+    offsetOdd -= scrollStep;
+    if (offsetOdd <= -LEDS_PER_STRIP) offsetOdd = LEDS_PER_STRIP;
+    updateRows(true);
+  }
+
+  if (currentMillis - previousMillisEven >= scrollInterval) {
+    previousMillisEven = currentMillis;
+    offsetEven -= scrollStep;
+    if (offsetEven <= -LEDS_PER_STRIP) offsetEven = LEDS_PER_STRIP;
+    updateRows(false);
+  }
+}
+
+void handleRoot() {
+  server.send(200, "text/html", MAIN_page);
+}
+
+void handleGetSettings() {
+  String json = "{";
+  json += "\"text\":\"" + String(displayText) + "\",";
+  json += "\"colorR\":" + String(textColorR) + ",";
+  json += "\"colorG\":" + String(textColorG) + ",";
+  json += "\"colorB\":" + String(textColorB) + ",";
+  json += "\"brightness\":" + String(brightness) + ",";
+  json += "\"scrollInterval\":" + String(scrollInterval) + ",";
+  json += "\"scrollStep\":" + String(scrollStep);
+  json += "}";
+  
+  server.send(200, "application/json", json);
+}
+
+void handleUpdate() {
+  String newText = server.arg("text");
+  
+  if (newText.length() > 0 && newText != String(displayText)) {
+    memset(displayBuffer, 0, sizeof(displayBuffer));
+    
+    strncpy(displayText, newText.c_str(), sizeof(displayText) - 1);
+    displayText[sizeof(displayText) - 1] = '\0';
+    
+    textWidth = strlen(displayText) * CHAR_PITCH;
+    
+    offsetOdd = LEDS_PER_STRIP;
+    offsetEven = LEDS_PER_STRIP;
+  }
+  
+  if (server.hasArg("colorR") && server.hasArg("colorG") && server.hasArg("colorB")) {
+    textColorR = constrain(server.arg("colorR").toInt(), 0, 255);
+    textColorG = constrain(server.arg("colorG").toInt(), 0, 255);
+    textColorB = constrain(server.arg("colorB").toInt(), 0, 255);
+  }
+  
+  if (server.hasArg("brightness")) {
+    setBrightness(server.arg("brightness").toInt());
+  }
+  
+  if (server.hasArg("scrollInterval")) {
+    setScrollInterval(server.arg("scrollInterval").toInt());
+  }
+  
+  if (server.hasArg("scrollStep")) {
+    setScrollStep(server.arg("scrollStep").toInt());
+  }
+  
+  server.send(200, "text/plain", "Settings updated successfully");
+}
+
+void updateRows(bool isOdd) {
+  int startRow = isOdd ? 1 : 0;
+
+  // Clear the display buffer for the rows we're updating
+  for (int y = startRow; y < NUM_STRIPS; y += 2)
+    memset(displayBuffer[y], 0, LEDS_PER_STRIP * sizeof(bool));
+
+  int offset = isOdd ? offsetOdd : offsetEven;
+
+  // Draw fifteen instances of the text
+  for (int instance = 0; instance < 30; instance++) {
+    int instanceOffset = offset + instance * (textWidth + TEXT_SPACING);
+    
+    for (int i = 0; i < strlen(displayText); i++) {
+      drawCharacter(displayText[i], instanceOffset + i * CHAR_PITCH, isOdd);
+    }
+  }
+
+  // Update the LED strips
+  for (int y = startRow; y < NUM_STRIPS; y += 2) {
+    for (int x = 0; x < LEDS_PER_STRIP; x++) {
+      uint32_t color = displayBuffer[y][x] ? strips[y].Color(textColorR, textColorG, textColorB) : 0;
+      strips[y].setPixelColor(x, color);
+    }
+    strips[y].show();
+  }
+} 
+
+void drawCharacter(char c, int xOffset, bool isOdd) {
+  int letterIndex = getLetterIndex(c);
+  if (letterIndex == -1) return;
+
+  for (int row = isOdd ? 1 : 0; row < NUM_STRIPS; row += 2) {
+    if (row >= FONT_HEIGHT) continue;
+
+    uint32_t rowData = font18x12[letterIndex][FONT_HEIGHT - 1 - row];
+    for (int col = 0; col < FONT_WIDTH; col++) {
+      int targetX = LEDS_PER_STRIP - 1 - (xOffset + col);
+      if (targetX >= 0 && targetX < LEDS_PER_STRIP) {
+        if (rowData & (1 << (FONT_WIDTH - 1 - col)))
+          displayBuffer[row][targetX] = true;
+      }
+    }
+  }
+}
+
+int getLetterIndex(char c) {
+  if (c >= 'A' && c <= 'Z') return c - 'A';
+  if (c >= 'a' && c <= 'z') return c - 'a';
+  if (c == ' ') return 26;
+  if (c >= '0' && c <= '9') return 27 + (c - '0');
+  switch (c) {
+    case '!': return 37;
+    case ',': return 38;
+    case '.': return 39;
+    case ':': return 40;
+    case ';': return 41;
+    case '?': return 42;
+    case '"': return 43;
+    case '\'': return 44;
+    case '#': return 45;
+    case '<': return 46;
+    case '>': return 47;
+    case '-': return 48;
+    default: return 26;
+  }
+}
+
+void setBrightness(int newBrightness) {
+  brightness = constrain(newBrightness, 0, 255);
+  for (int i = 0; i < NUM_STRIPS; i++) {
+    strips[i].setBrightness(brightness);
+    strips[i].show();
+  }
+}
+
+void setScrollInterval(int newInterval) {
+  scrollInterval = max(newInterval, 0);
+}
+
+void setScrollStep(int newStep) {
+  scrollStep = max(newStep, 1);
+}
