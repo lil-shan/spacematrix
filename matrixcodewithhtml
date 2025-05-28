@@ -13,9 +13,9 @@
 #define CHAR_SPACING     4
 #define CHAR_PITCH       (FONT_WIDTH + CHAR_SPACING)
 #define TEXT_SPACING     15
-
-const char* ssid = "LEDMatrixAP";
-const char* password = "matrix12345";
+\\enter wifi id and password here
+const char* ssid = "";
+const char* password = "";
 
 WebServer server(80);
 
